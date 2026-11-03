@@ -15,6 +15,6 @@ const registerSchema = z.object({
     .max(72, "Password is too long"),
 });
 
-module.export = {
+module.exports = {
   registerSchema,
 };
