@@ -1,6 +1,11 @@
 const bcrypt = require("bcrypt");
 const User = require("../models/User.js");
-const { registerSchema } = require("../utils/validators/auth.validator.js");
+const {
+  registerSchema,
+  loginSchema,
+} = require("../utils/validators/auth.validator.js");
+const jwt = require("jsonwebtoken");
+const { success } = require("zod");
 
 const registerUser = async (req, res) => {
   try {
@@ -67,4 +72,70 @@ const registerUser = async (req, res) => {
   }
 };
 
-module.exports = { registerUser };
+const loginUser = async (req, res) => {
+  try {
+    // 1. Validate req data
+    const validation = loginSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: validation.error.issues.map((issue) => ({
+          field: issue.path[0],
+          message: issue.message,
+        })),
+      });
+    }
+
+    const { email, password } = validation.data;
+
+    // 2. Find user and explicitly select password
+    const user = await User.findOne({ email: email.toLocaleLowerCase() }).select(
+      "+password",
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    // 3. Compare password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    // 4. Generate JWT token
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
+
+    // 5. Send response
+    return res.status(200).json({
+      success: true,
+      message: "Login seccessful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { registerUser, loginUser };
