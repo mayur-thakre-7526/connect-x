@@ -31,6 +31,47 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    branch: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    graduationYear: {
+      type: Number,
+      min: 2020,
+      max: 2040,
+    },
+
+    interests: {
+      type: [String],
+      defalult: [],
+    },
+
+    preferredRole: {
+      type: String,
+      trim: true,
+      defalut: "",
+    },
+
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: 300,
+      default: "",
+    },
+
+    github: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    linkedin: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { timestamps: true },
 );

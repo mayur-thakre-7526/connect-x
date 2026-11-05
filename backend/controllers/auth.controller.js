@@ -6,6 +6,9 @@ const {
 } = require("../utils/validators/auth.validator.js");
 const jwt = require("jsonwebtoken");
 const { success } = require("zod");
+const {
+  updateProfileSchema,
+} = require("../utils/validators/profile.validator.js");
 
 const registerUser = async (req, res) => {
   try {
@@ -170,4 +173,47 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getMe };
+const updateProfile = async (req, res) => {
+  try {
+    const validationResult = updateProfileSchema.safeParse(req.body);
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid profile data",
+        errors: validationResult.error.issues,
+      });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: validationResult.data },
+      {
+        new: true,
+        runValidators: true,
+      },
+    ).select("-password"); // All fields chahiye without password
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not fount",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { registerUser, loginUser, getMe, updateProfile };
