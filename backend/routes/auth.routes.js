@@ -2,7 +2,10 @@ const express = require("express");
 const {
   registerUser,
   loginUser,
+  getMe,
 } = require("../controllers/auth.controller.js");
+
+const protect = require("../middleware/auth.middleware.js");
 
 const router = express.Router();
 
@@ -11,5 +14,8 @@ router.post("/register", registerUser);
 
 // POST /api/auth/login
 router.post("/login", loginUser);
+
+// GET /api/auth/me
+router.get("/me", protect, getMe);
 
 module.exports = router;

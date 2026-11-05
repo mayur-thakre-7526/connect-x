@@ -91,9 +91,9 @@ const loginUser = async (req, res) => {
     const { email, password } = validation.data;
 
     // 2. Find user and explicitly select password
-    const user = await User.findOne({ email: email.toLocaleLowerCase() }).select(
-      "+password",
-    );
+    const user = await User.findOne({
+      email: email.toLocaleLowerCase(),
+    }).select("+password");
 
     if (!user) {
       return res.status(401).json({
@@ -138,4 +138,36 @@ const loginUser = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser };
+const getMe = async (req, res) => {
+  try {
+    // Find authenticated user
+    const user = await User.findById(req.user.userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not fount",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        college: user.college,
+        skills: user.skills,
+      },
+    });
+  } catch (error) {
+    console.error("Get profile error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { registerUser, loginUser, getMe };
