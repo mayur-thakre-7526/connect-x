@@ -5,6 +5,7 @@ require("dotenv").config();
 const connectDB = require("./config/db.js");
 const authRoutes = require("./routes/auth.routes.js");
 const discoverRoutes = require("./routes/discovery.routes.js");
+const teamRoutes = require("./routes/team.routes.js");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -16,6 +17,7 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", discoverRoutes);
+app.use("/api/teams", teamRoutes);
 
 // Health check route
 app.get("/", (req, res) => {
