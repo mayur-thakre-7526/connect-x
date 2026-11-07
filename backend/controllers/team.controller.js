@@ -1,5 +1,9 @@
+const { success } = require("zod");
 const Team = require("../models/Team.js");
 const { createTeamSchema } = require("../utils/validators/team.validator.js");
+const {
+  discoverTeamsSchema,
+} = require("../utils/validators/team.validator.js");
 
 const createTeam = async (req, res) => {
   try {
@@ -56,4 +60,76 @@ const createTeam = async (req, res) => {
   }
 };
 
-module.exports = { createTeam };
+const discoverTeams = async (req, res) => {
+  try {
+    // 1. Validate query parameters
+    const validationResult = discoverTeamsSchema.safeParse(req.query);
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid query parameters",
+        errors: validationResult.error.issues,
+      });
+    }
+
+    const { skill, status, page, limit } = validationResult.data;
+
+    // 2. Build MongoDB query
+    const query = {};
+
+    if (skill) {
+      query.requiredSkills = {
+        $regex: skill,
+        $options: "i",
+      };
+    }
+
+    if (status) {
+      query.status = status;
+    }
+
+    // 3. Calculate pagination
+    const skip = (page - 1) * limit;
+
+    // 4. Fetch temas and total count
+    const [teams, totalTeams] = await Promise.all([
+      Team.find(query)
+        .populate("createdBy", "name email college")
+        .populate("members.user", "name email college")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Team.countDocuments(query),
+    ]);
+
+    // 5. Calculate pagination info
+    const totalPages = Math.ceil(totalTeams / limit);
+
+    // 6. Return res
+    return res.status(200).json({
+      success: true,
+      message: "Teams fetched successfully",
+      pagination: {
+        currentPage: page,
+        limit,
+        totalTeams,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      teams,
+    });
+  } catch (error) {
+    console.error("Discover teams error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { createTeam, discoverTeams };

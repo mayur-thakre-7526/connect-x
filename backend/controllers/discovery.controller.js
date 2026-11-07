@@ -3,7 +3,7 @@ const {
   discoverySchema,
 } = require("../utils/validators/discovery.validator.js");
 
-const discoverStudets = async (req, res) => {
+const discoverStudents = async (req, res) => {
   try {
     // Validate query parameters
     const validationResult = discoverySchema.safeParse(req.query);
@@ -98,4 +98,4 @@ const discoverStudets = async (req, res) => {
   }
 };
 
-module.exports = { discoverStudets };
+module.exports = { discoverStudents };

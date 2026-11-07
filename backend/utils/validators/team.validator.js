@@ -14,4 +14,13 @@ const createTeamSchema = z
   })
   .strict();
 
-module.exports = { createTeamSchema };
+const discoverTeamsSchema = z
+  .object({
+    skill: z.string().trim().optional(),
+    status: z.enum(["recruiting", "closed"]).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(50).default(10),
+  })
+  .strict();
+
+module.exports = { createTeamSchema, discoverTeamsSchema };
