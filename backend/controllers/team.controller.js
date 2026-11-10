@@ -1,4 +1,5 @@
 const { success } = require("zod");
+const mongoose = require("mongoose");
 const Team = require("../models/Team.js");
 const { createTeamSchema } = require("../utils/validators/team.validator.js");
 const {
@@ -249,4 +250,66 @@ const sendJoinRequest = async (req, res) => {
   }
 };
 
-module.exports = { createTeam, discoverTeams, sendJoinRequest };
+const getTeamJoinRequests = async (req, res) => {
+  try {
+    // 1. Validate team ID
+    if (!mongoose.Types.ObjectId.isValid(req.params.teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // 2. Find the team
+    const team = await Team.findById(req.params.teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // 3. Check whether logged-in user is the team leader
+    if (team.createdBy.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team leader can view join requests",
+      });
+    }
+
+    // 4. Fetch join requests
+    const joinRequests = await JoinRequest.find({
+      team: team._id,
+    })
+      .populate("user", "name email college branch graduationYear skills")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // 5. Return response
+    return res.status(200).json({
+      success: true,
+      message: "Join requests fetched successfully",
+      team: {
+        id: team._id,
+        teamName: team.teamName,
+      },
+      totalRequests: joinRequests.length,
+      joinRequests,
+    });
+  } catch (error) {
+    console.error("Get team join requests error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = {
+  createTeam,
+  discoverTeams,
+  sendJoinRequest,
+  getTeamJoinRequests,
+};
