@@ -23,4 +23,14 @@ const discoverTeamsSchema = z
   })
   .strict();
 
-module.exports = { createTeamSchema, discoverTeamsSchema };
+const createJoinRequestSchema = z
+  .object({
+    message: z.string().trim().max(300).optional().default(""),
+  })
+  .strict();
+
+module.exports = {
+  createTeamSchema,
+  discoverTeamsSchema,
+  createJoinRequestSchema,
+};

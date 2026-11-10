@@ -5,6 +5,12 @@ const {
   discoverTeamsSchema,
 } = require("../utils/validators/team.validator.js");
 
+const JoinRequest = require("../models/JoinRequest.js");
+const {
+  createJoinRequestSchema,
+} = require("../utils/validators/team.validator.js");
+const joinRequest = require("../models/JoinRequest.js");
+
 const createTeam = async (req, res) => {
   try {
     // 1. Validate req body
@@ -132,4 +138,115 @@ const discoverTeams = async (req, res) => {
   }
 };
 
-module.exports = { createTeam, discoverTeams };
+const sendJoinRequest = async (req, res) => {
+  try {
+    // 1. Validate req body
+    const validationResult = createJoinRequestSchema.safeParse(req.body);
+
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request data",
+        errors: validationResult.error.issues,
+      });
+    }
+
+    const { message } = validationResult.data;
+
+    // 2. Find the requested team
+    const team = await Team.findById(req.params.teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // 3. Check whether team is recruiting
+    if (team.status !== "recruiting") {
+      return res.status(400).json({
+        success: false,
+        message: "This team is not accepting new members",
+      });
+    }
+
+    // 4. Check whether user is already a member
+
+    const isMember = team.members.some(
+      (member) => member.user.toString() === req.user.userId,
+    );
+
+    if (isMember) {
+      return res.status(400).json({
+        success: false,
+        message: "You are already a member of this team",
+      });
+    }
+
+    // 5. Check whether team is full
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({
+        success: false,
+        message: "This team is already full",
+      });
+    }
+
+    // 6. Check existing join req
+    const existingRequest = await JoinRequest.findOne({
+      team: team._id,
+      user: req.user.userId,
+    });
+
+    if (existingRequest) {
+      if (existingRequest.status === "pending") {
+        return res.status(409).json({
+          success: false,
+          message: "You already have a pending request",
+        });
+      }
+      if (existingRequest.status === "accepted") {
+        return res.status(400).json({
+          success: false,
+          message: "Your request has already benn accepted",
+        });
+      }
+
+      // Allow resubmission after rejection
+      existingRequest.message = message;
+      existingRequest.status = "pending";
+      existingRequest.reviewedAt = null;
+
+      await existingRequest.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Join request resubmitted successfully",
+        joinRequest: existingRequest,
+      });
+    }
+
+    // 7. Create a new join request
+    const joinRequest = await JoinRequest.create({
+      team: team._id,
+      user: req.user.userId,
+      message,
+    });
+
+    // 8. Return response
+    return res.status(201).json({
+      success: true,
+      message: "Join request sent successfully",
+      joinRequest,
+    });
+  } catch (error) {
+    console.error("Send join request error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+module.exports = { createTeam, discoverTeams, sendJoinRequest };
