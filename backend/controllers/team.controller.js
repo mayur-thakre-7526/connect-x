@@ -307,9 +307,137 @@ const getTeamJoinRequests = async (req, res) => {
   }
 };
 
+const reviewJoinRequest = async (req, res) => {
+  try {
+    // 1. Validate IDs
+    const { teamId, requestId } = req.params;
+
+    if (
+      !mongoose.Types.ObjectId.isValid(teamId) ||
+      !mongoose.Types.ObjectId.isValid(requestId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team or request ID",
+      });
+    }
+
+    // 2. Validate status
+    const { status } = req.body;
+
+    if (!["accepted", "rejected"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be accepted or rejected",
+      });
+    }
+
+    // 3. Find team
+    const team = await Team.findById(teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // 4. Check team leader authorization
+    if (team.createdBy.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team leader can review requests",
+      });
+    }
+
+    // 5. Find the join request
+    const joinRequest = await JoinRequest.findOne({
+      _id: requestId,
+      team: team._id,
+    });
+
+    if (!joinRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Join request not found",
+      });
+    }
+
+    // 6. Only pending requests can be reviewed
+    if (joinRequest.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "This request has already been reviewed",
+      });
+    }
+
+    // 7. Handle acceptance
+    if (status === "accepted") {
+      if (team.status !== "recruiting") {
+        return res.status(400).json({
+          success: false,
+          message: "This team is not accepting new members",
+        });
+      }
+
+      if (team.members.length >= team.maxMembers) {
+        return res.status(400).json({
+          success: false,
+          message: "Team is already full",
+        });
+      }
+
+      const isAlreadyMember = team.members.some(
+        (member) => member.user.toString() === joinRequest.user.toString(),
+      );
+
+      if (isAlreadyMember) {
+        return res.status(400).json({
+          success: false,
+          message: "Student is already a team member",
+        });
+      }
+
+      // Add student to team
+      team.members.push({
+        user: joinRequest.user,
+        role: "member",
+      });
+
+      // Close team if maximum capacity is reached
+      if (team.members.length >= team.maxMembers) {
+        team.status = "closed";
+      }
+
+      await team.save();
+    }
+
+    // 8. Update request status
+    joinRequest.status = status;
+    joinRequest.reviewedAt = new Date();
+
+    await joinRequest.save();
+
+    // 9. Return response
+    return res.status(200).json({
+      success: true,
+      message: `Join request ${status} successfully`,
+      joinRequest,
+    });
+  } catch (error) {
+    console.error("Review join request error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
   sendJoinRequest,
   getTeamJoinRequests,
+  reviewJoinRequest,
 };
