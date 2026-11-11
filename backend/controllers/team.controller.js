@@ -434,10 +434,49 @@ const reviewJoinRequest = async (req, res) => {
   }
 };
 
+const getMyTeams = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const [createdTeams, joinedTeams] = await Promise.all([
+      Team.find({ createdBy: userId })
+        .populate("createdBy", "name email college")
+        .populate("members.user", "name email college")
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      Team.find({
+        "members.user": userId,
+        createdBy: { $ne: userId },
+      })
+        .populate("createdBy", "name email college")
+        .populate("members.user", "name email college")
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      totalCreated: createdTeams.length,
+      totalJoined: joinedTeams.length,
+      createdTeams,
+      joinedTeams,
+    });
+  } catch (error) {
+    console.error("Get My Teams Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your teams",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
   sendJoinRequest,
   getTeamJoinRequests,
   reviewJoinRequest,
+  getMyTeams,
 };

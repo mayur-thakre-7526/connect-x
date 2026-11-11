@@ -7,6 +7,7 @@ const {
   sendJoinRequest,
   getTeamJoinRequests,
   reviewJoinRequest,
+  getMyTeams,
 } = require("../controllers/team.controller.js");
 const protect = require("../middleware/auth.middleware.js");
 
@@ -15,6 +16,10 @@ router.post("/", protect, createTeam);
 
 // Discover teams (Protected Route)
 router.get("/discover", protect, discoverTeams);
+
+// Get logged-in user's teams (Protected Route)
+router.get("/my-teams", protect, getMyTeams);
+
 
 // Send join request (Protected Route)
 router.post("/:teamId/join-requests", protect, sendJoinRequest);
