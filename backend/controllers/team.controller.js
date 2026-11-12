@@ -11,6 +11,7 @@ const {
   createJoinRequestSchema,
 } = require("../utils/validators/team.validator.js");
 const joinRequest = require("../models/JoinRequest.js");
+const { updateTeamSchema } = require("../utils/validators/team.validator.js");
 
 const createTeam = async (req, res) => {
   try {
@@ -472,6 +473,77 @@ const getMyTeams = async (req, res) => {
   }
 };
 
+const updateTeam = async (req, res) => {
+  try {
+    // 1. Validate request body
+    const result = updateTeamSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: result.error.issues.map((issue) => issue.message),
+      });
+    }
+
+    // 2. Find team
+    const team = await Team.findById(req.params.teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // 3. Only team creator can update
+    if (team.createdBy.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team creator can update this team",
+      });
+    }
+
+    const updateData = result.data;
+
+    // 4. Prevent maxMembers  below current members
+    if (
+      updateData.maxMembers !== undefined &&
+      updateData.maxMembers < team.members.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum members cannot be less than current mombers (${team.members.length})`,
+      });
+    }
+
+    // 5. Update team fields
+    Object.assign(team, updateData);
+
+    // 6. Save updated team
+    await team.save();
+
+    // 7. Return updated team
+    const updatedTeam = await Team.findById(team._id)
+      .populate("createdBy", "name email college")
+      .populate("members.user", "name email college")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Team updated successfully",
+      team: updatedTeam,
+    });
+  } catch (error) {
+    console.error("Update Team Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update team",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -479,4 +551,5 @@ module.exports = {
   getTeamJoinRequests,
   reviewJoinRequest,
   getMyTeams,
+  updateTeam,
 };
