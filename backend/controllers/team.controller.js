@@ -659,6 +659,82 @@ const leaveTeam = async (req, res) => {
   }
 };
 
+const removeTeamMember = async (req, res) => {
+  try {
+    const { teamId, memberId } = req.params;
+    const userId = req.user.userId;
+
+    // step 1: validate ID's
+    if (
+      !mongoose.Types.ObjectId.isValid(teamId) ||
+      !mongoose.Types.ObjectId.isValid(memberId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID or member ID",
+      });
+    }
+
+    // step 2: Find team
+    const team = await Team.findById(teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // step 3: Only creator can remove member
+    if (team.createdBy.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team creator can remove members",
+      });
+    }
+
+    // step 4: prevent removing the creator
+    if (team.createdBy.toString() === memberId) {
+      return res.status(400).json({
+        success: false,
+        message: "Team creator cannot be removed",
+      });
+    }
+
+    // step 5: check membership
+    const isMember = team.members.some(
+      (member) => member.user.toString() === memberId,
+    );
+
+    if (!isMember) {
+      return res.status(404).json({
+        success: false,
+        message: "User is not a member of this team",
+      });
+    }
+
+    // step 6: remove member
+    team.members = team.members.filter(
+      (member) => member.user.toString() !== memberId,
+    );
+
+    // step 7: save updated team
+    await team.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Team member removed successfully",
+    });
+  } catch (error) {
+    console.error("Remove Team Member Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to remove team member",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -669,4 +745,5 @@ module.exports = {
   updateTeam,
   deleteTeam,
   leaveTeam,
+  removeTeamMember
 };

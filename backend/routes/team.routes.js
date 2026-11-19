@@ -11,7 +11,9 @@ const {
   updateTeam,
   deleteTeam,
   leaveTeam,
+  removeTeamMember,
 } = require("../controllers/team.controller.js");
+
 const protect = require("../middleware/auth.middleware.js");
 
 // Create a new team (Protected Route)
@@ -40,5 +42,8 @@ router.delete("/:teamId", protect, deleteTeam);
 
 // Leave a team (Only existing members)
 router.delete("/:teamId/members/me", protect, leaveTeam);
+
+// Remove a team member (Only team creator)
+router.delete("/:teamId/members/:memberId", protect, removeTeamMember);
 
 module.exports = router;
