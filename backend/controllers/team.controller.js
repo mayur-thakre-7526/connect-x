@@ -891,6 +891,67 @@ const updateRecruitmentStatus = async (req, res) => {
   }
 };
 
+const getTeamById = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.userId.toString();
+
+    // step 1: validate team id
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // step 2: find team and populate user details
+    const team = await Team.findById(teamId)
+      .populate(
+        "createdBy",
+        "name college branch skills preferredRole github linkedin",
+      )
+      .populate(
+        "members.user",
+        "name college branch skills preferredRole github linkedin",
+      );
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // step 3: Check whether current user is the creator
+    const isCreator = team.createdBy?._id.toString() === userId;
+
+    // step 4: Check whether current user is a member
+    const isMember = team.members.some(
+      (member) => member.user?._id.toString() === userId,
+    );
+
+    // step 5: calculate available slots
+    const availableSlots = Math.max(0, team.maxMembers - team.members.length);
+
+    // step 6: return team details
+    return res.status(200).json({
+      success: true,
+      message: "Team details fetched successfully",
+      team,
+      isCreator,
+      isMember,
+      availableSlots,
+    });
+  } catch (error) {
+    console.error("Get Team By ID Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch team details",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -903,4 +964,5 @@ module.exports = {
   leaveTeam,
   removeTeamMember,
   updateRecruitmentStatus,
+  getTeamById
 };

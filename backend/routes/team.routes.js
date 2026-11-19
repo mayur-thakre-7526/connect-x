@@ -13,6 +13,7 @@ const {
   leaveTeam,
   removeTeamMember,
   updateRecruitmentStatus,
+  getTeamById
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -25,6 +26,9 @@ router.get("/discover", protect, discoverTeams);
 
 // Get logged-in user's teams (Protected Route)
 router.get("/my-teams", protect, getMyTeams);
+
+// Get Team by Id
+router.get("/:teamId", protect, getTeamById)
 
 // Send join request (Protected Route)
 router.post("/:teamId/join-requests", protect, sendJoinRequest);
