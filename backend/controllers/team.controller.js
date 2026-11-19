@@ -155,8 +155,19 @@ const sendJoinRequest = async (req, res) => {
 
     const { message } = validationResult.data;
 
+    // validate team id
+    const { teamId } = req.params;
+
+    // Validate MongoDB ObjID
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
     // 2. Find the requested team
-    const team = await Team.findById(req.params.teamId);
+    const team = await Team.findById(teamId);
 
     if (!team) {
       return res.status(404).json({
@@ -242,6 +253,14 @@ const sendJoinRequest = async (req, res) => {
       joinRequest,
     });
   } catch (error) {
+    // Handle MongoDB duplicate key error
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "You have already send a join request to this team",
+      });
+    }
     console.error("Send join request error:", error);
 
     return res.status(500).json({
@@ -486,8 +505,18 @@ const updateTeam = async (req, res) => {
       });
     }
 
+    const { teamId } = req.params;
+
+    // validate MongoDB objectId
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
     // 2. Find team
-    const team = await Team.findById(req.params.teamId);
+    const team = await Team.findById(teamId);
 
     if (!team) {
       return res.status(404).json({
@@ -745,5 +774,5 @@ module.exports = {
   updateTeam,
   deleteTeam,
   leaveTeam,
-  removeTeamMember
+  removeTeamMember,
 };
