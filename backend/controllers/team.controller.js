@@ -594,6 +594,71 @@ const deleteTeam = async (req, res) => {
   }
 };
 
+const leaveTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.userId;
+
+    // Step 1: Validate Team ID
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // Step 2: Find team
+    const team = await Team.findById(teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // Step 3: Prevent creator from leaving
+    if (team.createdBy.toString() === userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Team creator cannot leave the team",
+      });
+    }
+
+    // Step 4: Check membership
+    const isMember = team.members.some(
+      (member) => member.user.toString() === userId,
+    );
+
+    if (!isMember) {
+      return res.status(400).json({
+        success: false,
+        message: "You are not a member of this team",
+      });
+    }
+
+    // Step 5: Remove user from members array
+    team.members = team.members.filter(
+      (member) => member.user.toString() !== userId,
+    );
+
+    // Step 6: Save updated team
+    await team.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "You have successfully left the team",
+    });
+  } catch (error) {
+    console.error("Leave Team Error", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to leave team",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -602,5 +667,6 @@ module.exports = {
   reviewJoinRequest,
   getMyTeams,
   updateTeam,
-  deleteTeam
+  deleteTeam,
+  leaveTeam,
 };
