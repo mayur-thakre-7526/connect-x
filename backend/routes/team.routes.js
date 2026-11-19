@@ -12,6 +12,7 @@ const {
   deleteTeam,
   leaveTeam,
   removeTeamMember,
+  updateRecruitmentStatus,
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -33,6 +34,9 @@ router.get("/:teamId/join-requests", protect, getTeamJoinRequests);
 
 // Accept/Reject join req (Protected Route)
 router.patch("/:teamId/join-requests/:requestId", protect, reviewJoinRequest);
+
+// Update team recruitment status
+router.patch("/:teamId/recruitment", protect, updateRecruitmentStatus);
 
 // Update team details (Protected Route)
 router.patch("/:teamId", protect, updateTeam);

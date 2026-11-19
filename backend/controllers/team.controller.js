@@ -1,17 +1,17 @@
 const { success } = require("zod");
 const mongoose = require("mongoose");
 const Team = require("../models/Team.js");
-const { createTeamSchema } = require("../utils/validators/team.validator.js");
 const {
+  createTeamSchema,
   discoverTeamsSchema,
+  createJoinRequestSchema,
+  updateTeamSchema,
+  updateRecruitmentStatusSchema,
 } = require("../utils/validators/team.validator.js");
 
 const JoinRequest = require("../models/JoinRequest.js");
-const {
-  createJoinRequestSchema,
-} = require("../utils/validators/team.validator.js");
+
 const joinRequest = require("../models/JoinRequest.js");
-const { updateTeamSchema } = require("../utils/validators/team.validator.js");
 
 const createTeam = async (req, res) => {
   try {
@@ -812,6 +812,85 @@ const removeTeamMember = async (req, res) => {
   }
 };
 
+const updateRecruitmentStatus = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+
+    // step 1: validate req body
+    const result = updateRecruitmentStatusSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: "Validation failed",
+        errors: result.error.issues.map((issue) => issue.message),
+      });
+    }
+
+    // step 2: validate team id
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // step 3: find team
+    const team = await Team.findById(teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // step 4: check authorization
+    if (team.createdBy.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team creator can update recruitment",
+      });
+    }
+
+    const { status } = result.data;
+
+    // step 5: prevent reopening a full team (team full hone par use leader bhi reopen nhi kar sakta recruiting ke liye)
+    if (status === "recruiting" && team.members.length >= team.maxMembers) {
+      return res.status(400).json({
+        success: false,
+        message: "Team is full. Increase capacity before reopening recruitment",
+      });
+    }
+
+    // step 6: update recruitment status
+    team.status = status;
+
+    await team.save();
+
+    return res.status(200).json({
+      success: true,
+      message:
+        status === "closed"
+          ? "Team recruitment closed successfully"
+          : "Team recruitment opened successfully",
+      team: {
+        _id: team._id,
+        teamName: team.teamName,
+        status: team.status,
+        currentMembers: team.members.length,
+        maxMembers: team.maxMembers,
+      },
+    });
+  } catch (error) {
+    console.error("Update Recruitment Status Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update recruitment status",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -823,4 +902,5 @@ module.exports = {
   deleteTeam,
   leaveTeam,
   removeTeamMember,
+  updateRecruitmentStatus,
 };

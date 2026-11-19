@@ -47,9 +47,16 @@ const updateTeamSchema = z
     message: "At least one field is required to update the team",
   });
 
+const updateRecruitmentStatusSchema = z
+  .object({
+    status: z.enum(["recruiting", "closed"]),
+  })
+  .strict();
+
 module.exports = {
   createTeamSchema,
   discoverTeamsSchema,
   createJoinRequestSchema,
   updateTeamSchema,
+  updateRecruitmentStatusSchema
 };
