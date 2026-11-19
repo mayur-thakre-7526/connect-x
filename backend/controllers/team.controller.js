@@ -12,6 +12,7 @@ const {
 const JoinRequest = require("../models/JoinRequest.js");
 
 const joinRequest = require("../models/JoinRequest.js");
+const { useId } = require("react");
 
 const createTeam = async (req, res) => {
   try {
@@ -952,6 +953,60 @@ const getTeamById = async (req, res) => {
   }
 };
 
+const getMyTeamJoinRequest = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.userId;
+
+    // step 1: validate team id
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // step 2: check if team exists
+    const team = await Team.findById(teamId).select("_id teamName");
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // step 3: find current user's join request
+    const joinRequest = await JoinRequest.findOne({
+      team: teamId,
+      user: useId,
+    }).select("_id team user message status createdAt updatedAt reviewdAt");
+
+    // step 4: Handle no existing req
+    if (!joinRequest) {
+      return res.status(200).json({
+        success: true,
+        message: "No join request found for this team",
+        request: null,
+      });
+    }
+
+    // step 5: return user's request
+    return res.status(200).json({
+      success: true,
+      message: "Join request fetched successfully",
+      request: joinRequest,
+    });
+  } catch (error) {
+    console.error("Get My Team Join Request Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch join request",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -964,5 +1019,6 @@ module.exports = {
   leaveTeam,
   removeTeamMember,
   updateRecruitmentStatus,
-  getTeamById
+  getTeamById,
+  getMyTeamJoinRequest,
 };

@@ -13,7 +13,8 @@ const {
   leaveTeam,
   removeTeamMember,
   updateRecruitmentStatus,
-  getTeamById
+  getTeamById,
+  getMyTeamJoinRequest,
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -28,10 +29,13 @@ router.get("/discover", protect, discoverTeams);
 router.get("/my-teams", protect, getMyTeams);
 
 // Get Team by Id
-router.get("/:teamId", protect, getTeamById)
+router.get("/:teamId", protect, getTeamById);
 
 // Send join request (Protected Route)
 router.post("/:teamId/join-requests", protect, sendJoinRequest);
+
+// Logged-in student's own req status
+router.get("/:teamId/join-requests/me", protect, getMyTeamJoinRequest);
 
 // Get join requests (Protected Route)
 router.get("/:teamId/join-requests", protect, getTeamJoinRequests);
