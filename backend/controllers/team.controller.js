@@ -544,6 +544,56 @@ const updateTeam = async (req, res) => {
   }
 };
 
+const deleteTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+
+    // Step 1: Validate Team ID
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // Step 2: Find team
+    const team = await Team.findById(teamId);
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not fount",
+      });
+    }
+
+    // step 3: Only creator can delete the team
+    if (team.createdBy.toString() !== req.user.userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team creator can delete this team",
+      });
+    }
+
+    // Step 4: Delete all related join requests
+    await JoinRequest.deleteMany({ team: teamId });
+
+    // Step 5: Delete the team
+    await Team.findByIdAndDelete(teamId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Team deleted Successfully",
+    });
+  } catch (error) {
+    console.error("Delete Team Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete team",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -552,4 +602,5 @@ module.exports = {
   reviewJoinRequest,
   getMyTeams,
   updateTeam,
+  deleteTeam
 };

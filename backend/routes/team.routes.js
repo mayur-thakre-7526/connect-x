@@ -9,6 +9,7 @@ const {
   reviewJoinRequest,
   getMyTeams,
   updateTeam,
+  deleteTeam,
 } = require("../controllers/team.controller.js");
 const protect = require("../middleware/auth.middleware.js");
 
@@ -32,5 +33,8 @@ router.patch("/:teamId/join-requests/:requestId", protect, reviewJoinRequest);
 
 // Update team details (Protected Route)
 router.patch("/:teamId", protect, updateTeam);
+
+// Delete a team (Only team creator)
+router.delete("/:teamId", protect, deleteTeam);
 
 module.exports = router;
