@@ -426,7 +426,7 @@ const reviewJoinRequest = async (req, res) => {
 
       // Close team if maximum capacity is reached
       if (team.members.length >= team.maxMembers) {
-        team.status = "closed";
+        team.status = "full";
       }
 
       await team.save();
@@ -548,6 +548,16 @@ const updateTeam = async (req, res) => {
 
     // 5. Update team fields
     Object.assign(team, updateData);
+
+    // when leader change maxMembers then automatically change the recruiting status
+
+    if (updateData.maxMembers !== undefined && team.status !== "closed") {
+      if (team.members.length >= team.maxMembers) {
+        team.status = "full";
+      } else {
+        team.status = "recruiting";
+      }
+    }
 
     // 6. Save updated team
     await team.save();
@@ -671,8 +681,28 @@ const leaveTeam = async (req, res) => {
       (member) => member.user.toString() !== userId,
     );
 
+    // Reopen team only if it was full and now has available capacity
+
+    if (team.status === "full" && team.members.length < team.maxMembers) {
+      team.status = "recruiting";
+    }
+
     // Step 6: Save updated team
     await team.save();
+
+    await JoinRequest.findOneAndUpdate(
+      {
+        team: teamId,
+        user: userId,
+        status: "accepted",
+      },
+      {
+        $set: {
+          status: "rejected",
+          reviewedAt: new Date(),
+        },
+      },
+    );
 
     return res.status(200).json({
       success: true,
@@ -747,8 +777,26 @@ const removeTeamMember = async (req, res) => {
       (member) => member.user.toString() !== memberId,
     );
 
+    if (team.status === "full" && team.members.length < team.maxMembers) {
+      team.status = "recruiting";
+    }
+
     // step 7: save updated team
     await team.save();
+
+    await JoinRequest.findOneAndUpdate(
+      {
+        team: teamId,
+        user: memberId,
+        status: "accepted", // only accepted req should modify
+      },
+      {
+        $set: {
+          status: "rejected",
+          reviewedAt: new Date(),
+        },
+      },
+    );
 
     return res.status(200).json({
       success: true,

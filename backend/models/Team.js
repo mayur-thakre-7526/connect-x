@@ -73,7 +73,7 @@ const teamSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["recruiting", "closed"],
+      enum: ["recruiting", "full", "closed"],
       default: "recruiting",
     },
   },
