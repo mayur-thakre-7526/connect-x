@@ -1045,6 +1045,73 @@ const getMyJoinRequests = async (req, res) => {
   }
 };
 
+const withdrawJoinRequest = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.userId;
+
+    // step 1: Validate Team ID
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    // Step 2: check whether team exists
+    const teamExists = await Team.exists({
+      _id: teamId,
+    });
+
+    if (!teamExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // step 3: delete only the logged-in user's pending req
+    const deleteRequest = await JoinRequest.findOneAndDelete({
+      team: teamId,
+      usre: userId,
+      status: "pending",
+    });
+
+    // step 4: Handle request not deleted
+    if (!deleteRequest) {
+      const existingRequest = await JoinRequest.findOne({
+        team: teamId,
+        user: userId,
+      }).select("status");
+
+      if (existingRequest) {
+        return res.status(409).json({
+          success: false,
+          message: "Only pending join requests can be withdrawn",
+        });
+      }
+
+      return res.status(404).json({
+        success: false,
+        message: "Join request not found",
+      });
+    }
+
+    // step 5: success
+    return res.status(200).json({
+      success: true,
+      message: "Join request withdrawn successfully",
+    });
+  } catch (error) {
+    console.error("Withdraw Join Request Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to withdraw join request",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -1060,4 +1127,5 @@ module.exports = {
   getTeamById,
   getMyTeamJoinRequest,
   getMyJoinRequests,
+  withdrawJoinRequest
 };
