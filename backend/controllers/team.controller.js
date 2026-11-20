@@ -1011,29 +1011,96 @@ const getMyJoinRequests = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // step 1: Fetch all req of logged-in student
-    const joinRequests = await JoinRequest.find({
-      user: userId,
-    })
-      .select("team message status reviewedAt createdAt updatedAt")
-      .populate({
-        path: "team",
-        select:
-          "teamName projectTitle description requiredSkills status maxMembers createdBy",
-        populate: {
-          path: "createdBy",
-          select: "name college",
-        },
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+    // step 1: Read query parameters
+    // if not status given then bydefault we will take fields default
+    const { status = "all", page = "1", limit = "10" } = req.query;
 
-    // Step 2: Return all req's
+    // Step 2: Validate status filter
+    const allowedStatuses = ["all", "pending", "accepted", "rejected"];
+
+    if (typeof status !== "string" || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status filter",
+      });
+    }
+
+    // Step 3: Validate pagination parameters
+    const isPositiveInteger = (value) =>
+      typeof value === "string" &&
+      /^[1-9]\d*$/.test(value) &&
+      Number.isSafeInteger(Number(value));
+
+    if (!isPositiveInteger(page) || !isPositiveInteger(limit)) {
+      return res.status(400).json({
+        success: false,
+        message: "Page and limit must be positive integers",
+      });
+    }
+
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+
+    if (limitNumber > 50) {
+      return res.status(400).json({
+        success: false,
+        message: "Limit cannot exceed 50",
+      });
+    }
+
+    // Step 4: Build MongoDB query
+    const filter = {
+      user: userId,
+    };
+
+    if (status != "all") {
+      filter.status = status;
+    }
+
+    // Step 5: Calculate number of records to skip
+    const skip = (pageNumber - 1) * limitNumber;
+
+    if (!Number.isSafeInteger(skip)) {
+      return res.status(400).json({
+        success: false,
+        message: "Pagination offset is too large",
+      });
+    }
+
+    // Step 6: Fetch paginated records and count
+    const [joinRequest, totalRequests] = await Promise.all([
+      JoinRequest.find(filter)
+        .select("team message status reviewedAt createdAt updatedAt")
+        .populate({
+          path: "team",
+          select:
+            "teamName projectTitle description requiredSkills status maxMembers createdBy",
+          populate: { path: "createdBy", select: "name college" },
+        })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
+      JoinRequest.countDocuments(filter),
+    ]);
+
+    // Step 7: Calculate pagination metadata
+    const totalPages = Math.ceil(totalRequests / limitNumber);
+
+    // Step 8: Return response
     return res.status(200).json({
       success: true,
       message: "Join requests fetched successfully",
-      totalRequests: joinRequest.length,
-      requests: joinRequest,
+      appliedFilter: status,
+      totalRequests,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        limit: limitNumber,
+        hasNextPage: pageNumber < totalPages,
+        hasPrevPage: pageNumber > 1 && totalPages > 0,
+      },
+      requests: joinRequests,
     });
   } catch (error) {
     console.error("Get My Join Requests Error:", error);
@@ -1127,5 +1194,5 @@ module.exports = {
   getTeamById,
   getMyTeamJoinRequest,
   getMyJoinRequests,
-  withdrawJoinRequest
+  withdrawJoinRequest,
 };
