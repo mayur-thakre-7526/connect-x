@@ -17,6 +17,7 @@ const {
   getMyTeamJoinRequest,
   getMyJoinRequests,
   withdrawJoinRequest,
+  getMyJoinRequestStats,
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -32,6 +33,9 @@ router.get("/my-teams", protect, getMyTeams);
 
 // Get all join requests sent by logged-in student
 router.get("/my-join-requests", protect, getMyJoinRequests);
+
+// Get logged-in student's join req statistics (count of all status like pending, accepted, rejected etc)
+router.get("/my-join-request/stats", protect, getMyJoinRequestStats);
 
 // Get Team by Id
 router.get("/:teamId", protect, getTeamById);

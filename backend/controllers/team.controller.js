@@ -12,7 +12,6 @@ const {
 const JoinRequest = require("../models/JoinRequest.js");
 
 const joinRequest = require("../models/JoinRequest.js");
-const { useId } = require("react");
 
 const createTeam = async (req, res) => {
   try {
@@ -979,7 +978,7 @@ const getMyTeamJoinRequest = async (req, res) => {
     // step 3: find current user's join request
     const joinRequest = await JoinRequest.findOne({
       team: teamId,
-      user: useId,
+      user: userId,
     }).select("_id team user message status createdAt updatedAt reviewdAt");
 
     // step 4: Handle no existing req
@@ -1179,6 +1178,61 @@ const withdrawJoinRequest = async (req, res) => {
   }
 };
 
+const getMyJoinRequestStats = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // step 1: Get req counts using aggregation
+    const results = await JoinRequest.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(userId),
+        },
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // step 2: Initilize default counts
+    const stats = {
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+    };
+
+    // step 3: convert aggregatioin results
+    for (const item of results) {
+      if (
+        Object.prototype.hasOwnProperty.call(stats, item._id) &&
+        item._id !== "total"
+      ) {
+        stats[item._id] = item.count;
+      }
+
+      stats.total += item.count;
+    }
+
+    // step 4: return statistics
+    return res.status(200).json({
+      success: true,
+      message: "Join request statistics fetched successfully",
+      stats,
+    });
+  } catch (error) {
+    console.error("Get My Join Request Stats Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch join request statistics",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -1195,4 +1249,5 @@ module.exports = {
   getMyTeamJoinRequest,
   getMyJoinRequests,
   withdrawJoinRequest,
+  getMyJoinRequestStats,
 };
