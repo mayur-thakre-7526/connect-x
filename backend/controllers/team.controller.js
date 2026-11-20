@@ -1007,6 +1007,44 @@ const getMyTeamJoinRequest = async (req, res) => {
   }
 };
 
+const getMyJoinRequests = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // step 1: Fetch all req of logged-in student
+    const joinRequests = await JoinRequest.find({
+      user: userId,
+    })
+      .select("team message status reviewedAt createdAt updatedAt")
+      .populate({
+        path: "team",
+        select:
+          "teamName projectTitle description requiredSkills status maxMembers createdBy",
+        populate: {
+          path: "createdBy",
+          select: "name college",
+        },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Step 2: Return all req's
+    return res.status(200).json({
+      success: true,
+      message: "Join requests fetched successfully",
+      totalRequests: joinRequest.length,
+      requests: joinRequest,
+    });
+  } catch (error) {
+    console.error("Get My Join Requests Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch join requests",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -1021,4 +1059,5 @@ module.exports = {
   updateRecruitmentStatus,
   getTeamById,
   getMyTeamJoinRequest,
+  getMyJoinRequests,
 };
