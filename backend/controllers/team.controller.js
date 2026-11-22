@@ -272,16 +272,19 @@ const sendJoinRequest = async (req, res) => {
 
 const getTeamJoinRequests = async (req, res) => {
   try {
+    const { teamId } = teq.params;
+    const userId = req.user.userId;
+
     // 1. Validate team ID
-    if (!mongoose.Types.ObjectId.isValid(req.params.teamId)) {
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid team ID",
       });
     }
 
-    // 2. Find the team
-    const team = await Team.findById(req.params.teamId);
+    // Step 2: Check if team exists
+    const team = await Team.findById(teamId).select("createdBy teamName");
 
     if (!team) {
       return res.status(404).json({
@@ -290,39 +293,108 @@ const getTeamJoinRequests = async (req, res) => {
       });
     }
 
-    // 3. Check whether logged-in user is the team leader
-    if (team.createdBy.toString() !== req.user.userId) {
+    // Step 3: Only creator can view applications
+    if (team.createdBy.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
-        message: "Only the team leader can view join requests",
+        message: "Only the team creator can view join requests",
       });
     }
 
-    // 4. Fetch join requests
-    const joinRequests = await JoinRequest.find({
-      team: team._id,
-    })
-      .populate("user", "name email college branch graduationYear skills")
-      .sort({ createdAt: -1 })
-      .lean();
+    // Step 4: Read query parameters
+    const { status = "all", page = "1", limit = "10" } = req.query;
 
-    // 5. Return response
+    // Step 5: Validate status
+    const allowedStatuses = ["all", "pending", "accepted", "rejected"];
+
+    if (typeof status !== "string" || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status filter",
+      });
+    }
+
+    // Step 6: Validate pagination
+    const isPositiveInteger = (value) =>
+      typeof value === "string" &&
+      /^[1-9]\d*$/.test(value) &&
+      Number.isSafeInteger(Number(value));
+
+    if (!isPositiveInteger(page) && !isPositiveInteger(limit)) {
+      return res.status(400).json({
+        success: false,
+        message: "Page and limit must be positive integers",
+      });
+    }
+
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+
+    if (limitNumber > 50) {
+      return res.status(400).json({
+        success: false,
+        message: "Limit cannot exceed 50",
+      });
+    }
+
+    // step 7: Calculate pagination offset
+    const skip = (pageNumber - 1) * limitNumber;
+
+    if (!Number.isSafeInteger(skip)) {
+      return res.status(400).json({
+        success: false,
+        message: "Pagination offset is too large",
+      });
+    }
+
+    // step 8: Build MongoDB filter
+    const filter = {
+      team: teamId,
+    };
+
+    if (status !== "all") {
+      filter.status = status;
+    }
+
+    // step 9: Fetch applications and count
+    const [joinRequests, totalRequests] = await Promise.all([
+      JoinRequest.find(filter)
+        .populate(
+          "user",
+          "name college branch skills preferredRole bio github linkedin",
+        )
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
+
+      JoinRequest.countDocuments(filter),
+    ]);
+
+    // step 10: calculte pagination metadata
+    const totalPages = Math.ceil(totalRequests / limitNumber);
+
+    // Step 11: Return results
     return res.status(200).json({
       success: true,
-      message: "Join requests fetched successfully",
-      team: {
-        id: team._id,
-        teamName: team.teamName,
+      message: "Team join requests fetched successfully",
+      teamId: team._id,
+      totalRequests,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        limit: limitNumber,
+        hasNextPage: pageNumber < totalPages,
+        hasPrevPage: pageNumber > 1 && totalPages > 0,
       },
-      totalRequests: joinRequests.length,
-      joinRequests,
+      requests: joinRequests,
     });
   } catch (error) {
-    console.error("Get team join requests error:", error);
+    console.error("Get Team join requests Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Failed to fetch team join requests",
     });
   }
 };
@@ -1067,21 +1139,62 @@ const getMyJoinRequests = async (req, res) => {
     }
 
     // Step 6: Fetch paginated records and count
-    const [joinRequest, totalRequests] = await Promise.all([
+    const [joinRequests, statusCounts] = await Promise.all([
+      // Fetch current page of applications
       JoinRequest.find(filter)
         .select("team message status reviewedAt createdAt updatedAt")
         .populate({
           path: "team",
           select:
             "teamName projectTitle description requiredSkills status maxMembers createdBy",
-          populate: { path: "createdBy", select: "name college" },
+          populate: {
+            path: "createdBy",
+            select: "name college",
+          },
         })
         .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
         .limit(limitNumber)
         .lean(),
-      JoinRequest.countDocuments(filter),
+
+      // Count ALL applications by status
+      // Independent of the selected status filter
+      JoinRequest.aggregate([
+        {
+          $match: {
+            user: new mongoose.Types.ObjectId(userId),
+          },
+        },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
+
+    const stats = {
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+    };
+
+    for (const item of statusCounts) {
+      stats.total += item.count;
+
+      if (
+        item._id === "pending" ||
+        item._id === "accepted" ||
+        item._id === "rejected"
+      ) {
+        stats[item._id] = item.count;
+      }
+    }
+
+    // Total records matching the selected filter
+    const totalRequests = status === "all" ? stats.total : stats[status];
 
     // Step 7: Calculate pagination metadata
     const totalPages = Math.ceil(totalRequests / limitNumber);
@@ -1091,6 +1204,7 @@ const getMyJoinRequests = async (req, res) => {
       success: true,
       message: "Join requests fetched successfully",
       appliedFilter: status,
+      stats,
       totalRequests,
       pagination: {
         currentPage: pageNumber,
