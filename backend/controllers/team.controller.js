@@ -1347,6 +1347,88 @@ const getMyJoinRequestStats = async (req, res) => {
   }
 };
 
+const getTeamJoinRequestStats = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.user.userId;
+
+    // Step 1: Validate Team ID
+    if (!mongoose.Types.ObjectId.isValid(teamId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid team ID",
+      });
+    }
+
+    const team = await Team.findById(teamId).select("createdBy teamName");
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // Step 3: Verify team creator
+    if (team.createdBy.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the team creator can view statistics",
+      });
+    }
+
+    // step 4: Aggregate requests by status
+    const results = await JoinRequest.aggregate([
+      {
+        $match: {
+          team: team._id,
+        },
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // step 5: Initialize statistics
+    const stats = {
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+    };
+
+    // Step 6: Process aggregation results
+    for (const item of results) {
+      stats.total += item.count;
+
+      if (
+        item._id === "pending" ||
+        item._id === "accepted" ||
+        item._id === "rejected"
+      ) {
+        stats[item._id] = item.count;
+      }
+    }
+
+    // Step 7: Return statistics
+    return res.status(200).json({
+      success: true,
+      message: "Team join request statistics fetched successfully",
+      stats,
+    });
+  } catch (error) {
+    console.error("Get Team Join Request Stats Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch team join request statistics",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -1364,4 +1446,5 @@ module.exports = {
   getMyJoinRequests,
   withdrawJoinRequest,
   getMyJoinRequestStats,
+  getTeamJoinRequestStats,
 };

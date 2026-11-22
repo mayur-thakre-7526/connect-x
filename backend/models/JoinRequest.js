@@ -36,9 +36,10 @@ const joinRequestSchema = new mongoose.Schema(
   { timeseries: true },
 );
 
-// One req record per user per team
+// Prevent duplicate requests for the same team
 joinRequestSchema.index({ team: 1, user: 1 }, { unique: true });
 
+// Student's all applications
 // Optimize all requests for a student
 // Sorted newest first
 joinRequestSchema.index({
@@ -47,6 +48,7 @@ joinRequestSchema.index({
   _id: -1,
 });
 
+// Student's status-filtered applications
 // Optimize req's filtered by status
 // Sorted newest first
 joinRequestSchema.index({
@@ -55,6 +57,27 @@ joinRequestSchema.index({
   createdAt: -1,
   _id: -1,
 });
+
+
+// Team's all received applications
+// Optimize received join requests for a team 
+// Sorted newest first
+joinRequestSchema.index({
+  team: 1,
+  createdAt: -1, 
+  _id: -1,
+})
+
+
+// Team's status-filtered applications
+// Optimize received requests filtered by status
+// Sorted newest first
+joinRequestSchema.index({
+  team: 1,
+  status: 1,
+  createdAt: -1,
+  _id: -1,
+})
 
 const joinRequest = mongoose.model("JoinRequest", joinRequestSchema);
 

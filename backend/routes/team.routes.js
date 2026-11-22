@@ -18,6 +18,7 @@ const {
   getMyJoinRequests,
   withdrawJoinRequest,
   getMyJoinRequestStats,
+  getTeamJoinRequestStats,
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -48,6 +49,9 @@ router.get("/:teamId/join-requests/me", protect, getMyTeamJoinRequest);
 
 // Withdraw current student's pending join request
 router.delete("/:teamId/join-requests/me", protect, withdrawJoinRequest);
+
+// Get received join request statistics (creator only)
+router.get("/:teamId/join-requests/stats", protect, getTeamJoinRequestStats);
 
 // Get join requests (Protected Route)
 router.get("/:teamId/join-requests", protect, getTeamJoinRequests);
