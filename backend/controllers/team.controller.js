@@ -357,7 +357,9 @@ const getTeamJoinRequests = async (req, res) => {
     }
 
     // step 9: Fetch applications and count
-    const [joinRequests, totalRequests] = await Promise.all([
+
+    const [joinRequests, statusCounts] = await Promise.all([
+      // Query 1: Fetch filtered and paginated applications
       JoinRequest.find(filter)
         .populate(
           "user",
@@ -368,18 +370,63 @@ const getTeamJoinRequests = async (req, res) => {
         .limit(limitNumber)
         .lean(),
 
-      JoinRequest.countDocuments(filter),
+      // Query 2: Count ALL applications for this team
+      JoinRequest.aggregate([
+        {
+          $match: {
+            team: team._id,
+          },
+        },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
+
+    // Initialize statistics
+    const stats = {
+      total: 0,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+    };
+
+    // Process MongoDB aggregation results
+    for (const item of statusCounts) {
+      stats.total += item.count;
+
+      if (
+        item._id === "pending" ||
+        item._id === "accepted" ||
+        item._id === "rejected"
+      ) {
+        stats[item._id] = item.count;
+      }
+    }
+
+    // Calculate total matching the selected filter
+    const totalRequests = status === "all" ? stats.total : stats[status];
 
     // step 10: calculte pagination metadata
     const totalPages = Math.ceil(totalRequests / limitNumber);
 
     // Step 11: Return results
+
     return res.status(200).json({
       success: true,
       message: "Team join requests fetched successfully",
       teamId: team._id,
+      appliedFilter: status,
+
+      // Global team application statistics
+      stats,
+
+      // Count matching the selected filter
       totalRequests,
+
       pagination: {
         currentPage: pageNumber,
         totalPages,
@@ -387,6 +434,8 @@ const getTeamJoinRequests = async (req, res) => {
         hasNextPage: pageNumber < totalPages,
         hasPrevPage: pageNumber > 1 && totalPages > 0,
       },
+
+      // Current page applications
       requests: joinRequests,
     });
   } catch (error) {
