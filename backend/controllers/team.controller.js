@@ -305,7 +305,15 @@ const getTeamJoinRequests = async (req, res) => {
     const { status = "all", page = "1", limit = "10" } = req.query;
 
     // Step 5: Validate status
-    const allowedStatuses = ["all", "pending", "accepted", "rejected"];
+    const allowedStatuses = [
+      "all",
+      "pending",
+      "accepted",
+      "rejected",
+      "withdrawn",
+      "left",
+      "removed",
+    ];
 
     if (typeof status !== "string" || !allowedStatuses.includes(status)) {
       return res.status(400).json({
@@ -392,6 +400,9 @@ const getTeamJoinRequests = async (req, res) => {
       pending: 0,
       accepted: 0,
       rejected: 0,
+      withdrawn: 0,
+      left: 0,
+      removed: 0,
     };
 
     // Process MongoDB aggregation results
@@ -399,9 +410,8 @@ const getTeamJoinRequests = async (req, res) => {
       stats.total += item.count;
 
       if (
-        item._id === "pending" ||
-        item._id === "accepted" ||
-        item._id === "rejected"
+        Object.prototype.hasOwnProperty.call(stats, item._id) &&
+        item._id !== "total"
       ) {
         stats[item._id] = item.count;
       }
@@ -1136,7 +1146,15 @@ const getMyJoinRequests = async (req, res) => {
     const { status = "all", page = "1", limit = "10" } = req.query;
 
     // Step 2: Validate status filter
-    const allowedStatuses = ["all", "pending", "accepted", "rejected"];
+    const allowedStatuses = [
+      "all",
+      "pending",
+      "accepted",
+      "rejected",
+      "withdrawn",
+      "left",
+      "removed",
+    ];
 
     if (typeof status !== "string" || !allowedStatuses.includes(status)) {
       return res.status(400).json({
@@ -1228,15 +1246,17 @@ const getMyJoinRequests = async (req, res) => {
       pending: 0,
       accepted: 0,
       rejected: 0,
+      withdrawn: 0,
+      left: 0,
+      removed: 0,
     };
 
     for (const item of statusCounts) {
       stats.total += item.count;
 
       if (
-        item._id === "pending" ||
-        item._id === "accepted" ||
-        item._id === "rejected"
+        Object.prototype.hasOwnProperty.call(stats, item._id) &&
+        item._id !== "total"
       ) {
         stats[item._id] = item.count;
       }
@@ -1366,6 +1386,9 @@ const getMyJoinRequestStats = async (req, res) => {
       pending: 0,
       accepted: 0,
       rejected: 0,
+      withdrawn: 0,
+      left: 0,
+      removed: 0,
     };
 
     // step 3: convert aggregatioin results
@@ -1447,6 +1470,9 @@ const getTeamJoinRequestStats = async (req, res) => {
       pending: 0,
       accepted: 0,
       rejected: 0,
+      withdrawn: 0,
+      left: 0,
+      removed: 0,
     };
 
     // Step 6: Process aggregation results
@@ -1454,9 +1480,8 @@ const getTeamJoinRequestStats = async (req, res) => {
       stats.total += item.count;
 
       if (
-        item._id === "pending" ||
-        item._id === "accepted" ||
-        item._id === "rejected"
+        Object.prototype.hasOwnProperty.call(stats, item._id) &&
+        item._id !== "total"
       ) {
         stats[item._id] = item.count;
       }
