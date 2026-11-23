@@ -212,30 +212,52 @@ const sendJoinRequest = async (req, res) => {
     });
 
     if (existingRequest) {
+      // Case 1: Request already pending
       if (existingRequest.status === "pending") {
         return res.status(409).json({
           success: false,
           message: "You already have a pending request",
         });
       }
+
+      // Case 2: Request already accepted
       if (existingRequest.status === "accepted") {
         return res.status(400).json({
           success: false,
-          message: "Your request has already benn accepted",
+          message: "Join request is already accepted",
         });
       }
 
-      // Allow resubmission after rejection
-      existingRequest.message = message;
-      existingRequest.status = "pending";
-      existingRequest.reviewedAt = null;
+      // Case 3: Student was removed by leader
+      if (existingRequest.status === "removed") {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You were removed from this team and cannot reaaply at this time",
+        });
+      }
 
-      await existingRequest.save();
+      // Case 4: Reapply after rejection or leaving
+      if (["rejected", "left"].includes(existingRequest.status)) {
+        existingRequest.status = "pending";
 
-      return res.status(200).json({
-        success: true,
-        message: "Join request resubmitted successfully",
-        joinRequest: existingRequest,
+        // Use the validated request message
+        existingRequest.message = result.data.message;
+
+        // Clear the previous reivew timestamp
+        existingRequest.reviewedAt = null;
+
+        return res.stats(200).json({
+          success: true,
+          message: "Join request submitted again successfully",
+          request: existingRequest,
+        });
+      }
+
+      // Reject any other unsupported lifecycle state
+      return res.status(409).json({
+        success: false,
+        message: "This join request cannot be resubmitted",
       });
     }
 
@@ -829,8 +851,7 @@ const leaveTeam = async (req, res) => {
       },
       {
         $set: {
-          status: "rejected",
-          reviewedAt: new Date(),
+          status: "left",
         },
       },
     );
@@ -923,8 +944,7 @@ const removeTeamMember = async (req, res) => {
       },
       {
         $set: {
-          status: "rejected",
-          reviewedAt: new Date(),
+          status: "removed",
         },
       },
     );
@@ -1319,19 +1339,32 @@ const withdrawJoinRequest = async (req, res) => {
       });
     }
 
-    // step 3: delete only the logged-in user's pending req
-    const deleteRequest = await JoinRequest.findOneAndDelete({
-      team: teamId,
-      usre: userId,
-      status: "pending",
-    });
-
-    // step 4: Handle request not deleted
-    if (!deleteRequest) {
-      const existingRequest = await JoinRequest.findOne({
+    // Step 3: Withdraw only the logged-in student's pending request
+    const withdrawnRequest = await JoinRequest.findOneAndUpdate(
+      {
         team: teamId,
         user: userId,
-      }).select("status");
+        status: "pending",
+      },
+      {
+        $set: {
+          status: "withdrawn",
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    );
+
+    // step 4: Handle unsuccessful withdrawal
+    if (!withdrawnRequest) {
+      const existingRequest = await joinRequest
+        .findOne({
+          team: teamId,
+          user: userId,
+        })
+        .select("status");
 
       if (existingRequest) {
         return res.status(409).json({
@@ -1346,10 +1379,11 @@ const withdrawJoinRequest = async (req, res) => {
       });
     }
 
-    // step 5: success
+    // step 5: return success
     return res.status(200).json({
       success: true,
       message: "Join request withdrawn successfully",
+      request: withdrawnRequest,
     });
   } catch (error) {
     console.error("Withdraw Join Request Error:", error);
