@@ -612,9 +612,26 @@ const reviewJoinRequest = async (req, res) => {
     }
 
     // 8. Update request status
-    joinRequest.status = status;
-    joinRequest.reviewedAt = new Date();
 
+    // Preserve previous application status
+    const previousStatus = joinRequest.status;
+
+    // Update application status
+    joinRequest.status = status;
+
+    // Record the original review timestamp
+    const reviewTime = new Date();
+    joinRequest.reviewedAt = reviewTime;
+
+    // Store acceptance/rejection in history
+    joinRequest.statusHistory.push({
+      fromStatus: previousStatus,
+      toStatus: status,
+      changedBy: req.user.userId,
+      changedAt: reviewTime,
+    });
+
+    // Save status, review timestamp and history together
     await joinRequest.save();
 
     // 9. Return response
@@ -869,6 +886,8 @@ const leaveTeam = async (req, res) => {
     // Step 6: Save updated team
     await team.save();
 
+    const leaveTime = new Date();
+
     await JoinRequest.findOneAndUpdate(
       {
         team: teamId,
@@ -876,9 +895,24 @@ const leaveTeam = async (req, res) => {
         status: "accepted",
       },
       {
+        // Update current status
         $set: {
           status: "left",
         },
+
+        // Append lifecycle history
+        $push: {
+          statusHistory: {
+            statusHistory: "accepted",
+            toStatus: "left",
+            changedBy: userId,
+            changedAt: leaveTime,
+          },
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
       },
     );
 
@@ -962,6 +996,8 @@ const removeTeamMember = async (req, res) => {
     // step 7: save updated team
     await team.save();
 
+    const removalTime = new Date();
+
     await JoinRequest.findOneAndUpdate(
       {
         team: teamId,
@@ -972,6 +1008,20 @@ const removeTeamMember = async (req, res) => {
         $set: {
           status: "removed",
         },
+
+        // Record removal in lifecycle history
+        $push: {
+          statusHistory: {
+            fromStatus: "accepted",
+            toStatus: "removed",
+            changedBy: req.user.userId,
+            changedAt: removalTime,
+          },
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
       },
     );
 
