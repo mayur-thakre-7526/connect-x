@@ -238,14 +238,29 @@ const sendJoinRequest = async (req, res) => {
       }
 
       // Case 4: Reapply after rejection or leaving
-      if (["rejected", "left"].includes(existingRequest.status)) {
+      if (["rejected", "left", "withdrawn"].includes(existingRequest.status)) {
+        // step 1: Preserve previous status
+        const previousStatus = existingRequest.status;
+
+        // step 2: Update req
         existingRequest.status = "pending";
 
         // Use the validated request message
-        existingRequest.message = result.data.message;
+        existingRequest.message = message;
 
         // Clear the previous reivew timestamp
         existingRequest.reviewedAt = null;
+
+        // step 3: Record reapplication transition
+        existingRequest.statusHistory.push({
+          fromStatus: previousStatus,
+          toStatus: "pending",
+          changedBy: userId,
+          changedAt: new Date(),
+        });
+
+        // step 4: Save status and history together
+        await existingRequest.save();
 
         return res.stats(200).json({
           success: true,
@@ -266,6 +281,17 @@ const sendJoinRequest = async (req, res) => {
       team: team._id,
       user: req.user.userId,
       message,
+      status: "pending",
+
+      // Record initial application event
+      statusHistory: [
+        {
+          fromStatus: null,
+          toStatus: "pending",
+          changedBy: userId,
+          changedAt: new Date(),
+        },
+      ],
     });
 
     // 8. Return response

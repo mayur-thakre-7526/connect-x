@@ -1,5 +1,43 @@
 const mongoose = require("mongoose");
-const { createTeam } = require("../controllers/team.controller");
+
+const JOIN_REQUEST_STATUSES = [
+  "pending",
+  "accepted",
+  "rejected",
+  "withdrawn",
+  "left",
+  "removed",
+];
+
+const statusHistorySchema = new mongoose.Schema(
+  {
+    fromStatus: {
+      type: String,
+      enum: JOIN_REQUEST_STATUSES,
+      default: null,
+    },
+
+    toStatus: {
+      type: String,
+      enum: JOIN_REQUEST_STATUSES,
+      required: true,
+    },
+
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    changedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    _id: false,
+  },
+);
 
 const joinRequestSchema = new mongoose.Schema(
   {
@@ -24,7 +62,7 @@ const joinRequestSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "accepted", "rejected", "withdrawn", "left", "removed",],
+      enum: JOIN_REQUEST_STATUSES,
       default: "pending",
     },
 
@@ -32,8 +70,13 @@ const joinRequestSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    statusHistory: {
+      type: [statusHistorySchema],
+      default: [],
+    },
   },
-  { timeseries: true },
+  { timestamps: true },
 );
 
 // Prevent duplicate requests for the same team
@@ -58,16 +101,14 @@ joinRequestSchema.index({
   _id: -1,
 });
 
-
 // Team's all received applications
-// Optimize received join requests for a team 
+// Optimize received join requests for a team
 // Sorted newest first
 joinRequestSchema.index({
   team: 1,
-  createdAt: -1, 
+  createdAt: -1,
   _id: -1,
-})
-
+});
 
 // Team's status-filtered applications
 // Optimize received requests filtered by status
@@ -77,7 +118,7 @@ joinRequestSchema.index({
   status: 1,
   createdAt: -1,
   _id: -1,
-})
+});
 
 const joinRequest = mongoose.model("JoinRequest", joinRequestSchema);
 
