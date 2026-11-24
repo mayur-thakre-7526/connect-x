@@ -508,144 +508,152 @@ const getTeamJoinRequests = async (req, res) => {
 
 const reviewJoinRequest = async (req, res) => {
   try {
-    // 1. Validate IDs
     const { teamId, requestId } = req.params;
+    const reviewerId = req.user.userId.toString();
+    const { status } = req.body || {};
 
+    // Step 1: Validate MongoDB IDs
     if (
       !mongoose.Types.ObjectId.isValid(teamId) ||
       !mongoose.Types.ObjectId.isValid(requestId)
     ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid team or request ID",
+        message: "Invalid team ID or request ID",
       });
     }
 
-    // 2. Validate status
-    const { status } = req.body;
-
-    if (!["accepted", "rejected"].includes(status)) {
+    // Step 2: Validate review status
+    if (
+      !req.body ||
+      Object.keys(req.body).length !== 1 ||
+      !["accepted", "rejected"].includes(status)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Status must be accepted or rejected",
       });
     }
 
-    // 3. Find team
-    const team = await Team.findById(teamId);
+    // Helper for business validation errors
+    const fail = (statusCode, message) => {
+      const error = new Error(message);
+      error.statusCode = statusCode;
+      throw error;
+    };
 
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not found",
-      });
-    }
+    // Step 3: Start MongoDB session
+    const session = await mongoose.startSession();
 
-    // 4. Check team leader authorization
-    if (team.createdBy.toString() !== req.user.userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Only the team leader can review requests",
-      });
-    }
+    let updatedRequest;
 
-    // 5. Find the join request
-    const joinRequest = await JoinRequest.findOne({
-      _id: requestId,
-      team: team._id,
-    });
+    try {
+      await session.withTransaction(async () => {
+        // Step 4: Fetch team inside transaction
+        const team = await Team.findById(teamId).session(session);
 
-    if (!joinRequest) {
-      return res.status(404).json({
-        success: false,
-        message: "Join request not found",
-      });
-    }
+        if (!team) {
+          fail(404, "Team not found");
+        }
 
-    // 6. Only pending requests can be reviewed
-    if (joinRequest.status !== "pending") {
-      return res.status(400).json({
-        success: false,
-        message: "This request has already been reviewed",
-      });
-    }
+        // Step 5: Verify team creator
+        if (team.createdBy.toString() !== reviewerId) {
+          fail(403, "Only the team creator can review requests");
+        }
 
-    // 7. Handle acceptance
-    if (status === "accepted") {
-      if (team.status !== "recruiting") {
-        return res.status(400).json({
-          success: false,
-          message: "This team is not accepting new members",
+        // Step 6: Fetch request inside transaction
+        const joinRequest = await JoinRequest.findOne({
+          _id: requestId,
+          team: teamId,
+        }).session(session);
+
+        if (!joinRequest) {
+          fail(404, "Join request not found");
+        }
+
+        // Step 7: Prevent duplicate review
+        if (joinRequest.status !== "pending") {
+          fail(409, "Join request already reviewed");
+        }
+
+        // Step 8: Handle acceptance
+        if (status === "accepted") {
+          if (team.status !== "recruiting") {
+            fail(400, "Team is not recruiting");
+          }
+
+          if (team.members.length >= team.maxMembers) {
+            fail(400, "Team is full");
+          }
+
+          // Ensure applicant is not already a member
+          const alreadyMember = team.members.some(
+            (member) => member.user.toString() === joinRequest.user.toString(),
+          );
+
+          if (alreadyMember) {
+            fail(409, "Applicant is already a team member");
+          }
+
+          // Add accepted student
+          team.members.push({
+            user: joinRequest.user,
+            role: "member",
+          });
+
+          // Update team capacity status
+          if (team.members.length >= team.maxMembers) {
+            team.status = "full";
+          }
+
+          // Save team within transaction
+          await team.save({ session });
+        }
+
+        // Step 9: Update JoinRequest status
+        const reviewTime = new Date();
+
+        joinRequest.status = status;
+        joinRequest.reviewedAt = reviewTime;
+
+        // Step 10: Record lifecycle event
+        joinRequest.statusHistory.push({
+          fromStatus: "pending",
+          toStatus: status,
+          changedBy: reviewerId,
+          changedAt: reviewTime,
         });
-      }
 
-      if (team.members.length >= team.maxMembers) {
-        return res.status(400).json({
-          success: false,
-          message: "Team is already full",
-        });
-      }
+        // Save request within same transaction
+        await joinRequest.save({ session });
 
-      const isAlreadyMember = team.members.some(
-        (member) => member.user.toString() === joinRequest.user.toString(),
-      );
-
-      if (isAlreadyMember) {
-        return res.status(400).json({
-          success: false,
-          message: "Student is already a team member",
-        });
-      }
-
-      // Add student to team
-      team.members.push({
-        user: joinRequest.user,
-        role: "member",
+        updatedRequest = joinRequest;
       });
-
-      // Close team if maximum capacity is reached
-      if (team.members.length >= team.maxMembers) {
-        team.status = "full";
-      }
-
-      await team.save();
+    } finally {
+      // Always release the session
+      await session.endSession();
     }
 
-    // 8. Update request status
-
-    // Preserve previous application status
-    const previousStatus = joinRequest.status;
-
-    // Update application status
-    joinRequest.status = status;
-
-    // Record the original review timestamp
-    const reviewTime = new Date();
-    joinRequest.reviewedAt = reviewTime;
-
-    // Store acceptance/rejection in history
-    joinRequest.statusHistory.push({
-      fromStatus: previousStatus,
-      toStatus: status,
-      changedBy: req.user.userId,
-      changedAt: reviewTime,
-    });
-
-    // Save status, review timestamp and history together
-    await joinRequest.save();
-
-    // 9. Return response
+    // Step 11: Respond only after successful commit
     return res.status(200).json({
       success: true,
       message: `Join request ${status} successfully`,
-      joinRequest,
+      request: updatedRequest,
     });
   } catch (error) {
-    console.error("Review join request error:", error);
+    // Handle expected business errors
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error("Review Join Request Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Failed to review join request",
     });
   }
 };
@@ -830,103 +838,135 @@ const deleteTeam = async (req, res) => {
 };
 
 const leaveTeam = async (req, res) => {
+  const { teamId } = req.params;
+  const userId = req.user.userId.toString();
+
+  // Step 1: Validate Team ID
+  if (!mongoose.Types.ObjectId.isValid(teamId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid team ID",
+    });
+  }
+
+  let session;
+
+  // Helper for business errors
+  const fail = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
+  };
+
   try {
-    const { teamId } = req.params;
-    const userId = req.user.userId;
+    // Step 2: Start MongoDB session
+    session = await mongoose.startSession();
 
-    // Step 1: Validate Team ID
-    if (!mongoose.Types.ObjectId.isValid(teamId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid team ID",
-      });
-    }
+    let updatedTeamStatus;
 
-    // Step 2: Find team
-    const team = await Team.findById(teamId);
+    // Step 3: Execute both updates atomically
+    await session.withTransaction(async () => {
+      // Step 4: Find team inside transaction
+      const team = await Team.findById(teamId).session(session);
 
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not found",
-      });
-    }
+      if (!team) {
+        fail(404, "Team not found");
+      }
 
-    // Step 3: Prevent creator from leaving
-    if (team.createdBy.toString() === userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Team creator cannot leave the team",
-      });
-    }
+      // Step 5: Prevent creator from leaving
+      if (team.createdBy.toString() === userId) {
+        fail(403, "Team creator cannot leave the team");
+      }
 
-    // Step 4: Check membership
-    const isMember = team.members.some(
-      (member) => member.user.toString() === userId,
-    );
+      // Step 6: Verify student membership
+      const isMember = team.members.some(
+        (member) => member.user.toString() === userId,
+      );
 
-    if (!isMember) {
-      return res.status(400).json({
-        success: false,
-        message: "You are not a member of this team",
-      });
-    }
+      if (!isMember) {
+        fail(400, "You are not a member of this team");
+      }
 
-    // Step 5: Remove user from members array
-    team.members = team.members.filter(
-      (member) => member.user.toString() !== userId,
-    );
+      // Step 7: Update JoinRequest and history
+      const leaveTime = new Date();
 
-    // Reopen team only if it was full and now has available capacity
-
-    if (team.status === "full" && team.members.length < team.maxMembers) {
-      team.status = "recruiting";
-    }
-
-    // Step 6: Save updated team
-    await team.save();
-
-    const leaveTime = new Date();
-
-    await JoinRequest.findOneAndUpdate(
-      {
-        team: teamId,
-        user: userId,
-        status: "accepted",
-      },
-      {
-        // Update current status
-        $set: {
-          status: "left",
+      const updatedRequest = await JoinRequest.findOneAndUpdate(
+        {
+          team: teamId,
+          user: userId,
+          status: "accepted",
         },
-
-        // Append lifecycle history
-        $push: {
-          statusHistory: {
-            statusHistory: "accepted",
-            toStatus: "left",
-            changedBy: userId,
-            changedAt: leaveTime,
+        {
+          $set: {
+            status: "left",
+          },
+          $push: {
+            statusHistory: {
+              fromStatus: "accepted",
+              toStatus: "left",
+              changedBy: userId,
+              changedAt: leaveTime,
+            },
           },
         },
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
-    );
+        {
+          session,
+          new: true,
+          runValidators: true,
+        },
+      );
 
+      // Step 8: Abort if accepted request is missing
+      if (!updatedRequest) {
+        fail(
+          409,
+          "Accepted join request not found. Membership state is inconsistent",
+        );
+      }
+
+      // Step 9: Remove student from team
+      team.members = team.members.filter(
+        (member) => member.user.toString() !== userId,
+      );
+
+      // Step 10: Reopen full team if space exists
+      if (team.status === "full" && team.members.length < team.maxMembers) {
+        team.status = "recruiting";
+      }
+
+      // Step 11: Save team inside same transaction
+      await team.save({ session });
+
+      updatedTeamStatus = team.status;
+    });
+
+    // Step 12: Respond after successful commit
     return res.status(200).json({
       success: true,
-      message: "You have successfully left the team",
+      message: "You have left the team successfully",
+      teamId,
+      teamStatus: updatedTeamStatus,
     });
   } catch (error) {
-    console.error("Leave Team Error", error);
+    // Handle expected business errors
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error("Leave Team Transaction Error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to leave team",
     });
+  } finally {
+    // Step 13: Always release session
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 
