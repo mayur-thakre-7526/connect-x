@@ -1416,6 +1416,8 @@ const withdrawJoinRequest = async (req, res) => {
     }
 
     // Step 3: Withdraw only the logged-in student's pending request
+    const withdrawalTime = new Date();
+
     const withdrawnRequest = await JoinRequest.findOneAndUpdate(
       {
         team: teamId,
@@ -1425,6 +1427,16 @@ const withdrawJoinRequest = async (req, res) => {
       {
         $set: {
           status: "withdrawn",
+        },
+
+        // Record withdrawal in lifecycle history
+        $push: {
+          statusHistory: {
+            fromStatus: "pending",
+            toStatus: "withdrawn",
+            changedBy: userId,
+            changedAt: withdrawalTime,
+          },
         },
       },
       {
@@ -1613,6 +1625,86 @@ const getTeamJoinRequestStats = async (req, res) => {
   }
 };
 
+const getJoinRequestHistory = async (req, res) => {
+  try {
+    const { teamId, requestId } = req.params;
+    const userId = req.userId.toString();
+
+    // Step 1: Validate MongoDB IDs
+    if (
+      !mongoose.Types.ObjectId.isValid(teamId) ||
+      !mongoose.Types.ObjectId.isValid(requestId)
+    ) {
+      return res.stats(400).json({
+        success: false,
+        message: "Invalid team ID or request ID",
+      });
+    }
+
+    // Step 2: Check whether team exists
+    const team = await Team.findById(teamId)
+      .select("createdBy teamName")
+      .lean();
+
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: "Team not found",
+      });
+    }
+
+    // Step 3: Find request belonging to this team
+    const joinRequest = await JoinRequest.findOne({
+      _id: requestId,
+      team: teamId,
+    })
+      .select("team user status statusHistory createdAt updatedAt")
+      .lean();
+
+    if (!joinRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Join request not found",
+      });
+    }
+
+    // Step 4: Check authorization
+    const isApplicant = joinRequest.user.toString() === userId;
+
+    const isTeamCreator = team.createdBy.toString() === userId;
+
+    if (!isApplicant && !isTeamCreator) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view this request history",
+      });
+    }
+
+    // Step 5: Return recorded history
+    const history = joinRequest.statusHistory || [];
+
+    return res.status(200).json({
+      success: true,
+      message: "Join request history fetched successfully",
+      request: {
+        _id: joinRequest._id,
+        team: joinRequest.team,
+        user: joinRequest.user,
+        currentStatus: joinRequest.status,
+        totalEvents: history.length,
+        statusHistory: history,
+      },
+    });
+  } catch (error) {
+    console.error("Get Join Request History Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch join request history",
+    });
+  }
+};
+
 module.exports = {
   createTeam,
   discoverTeams,
@@ -1631,4 +1723,5 @@ module.exports = {
   withdrawJoinRequest,
   getMyJoinRequestStats,
   getTeamJoinRequestStats,
+  getJoinRequestHistory,
 };

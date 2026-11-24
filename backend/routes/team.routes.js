@@ -19,6 +19,7 @@ const {
   withdrawJoinRequest,
   getMyJoinRequestStats,
   getTeamJoinRequestStats,
+  getJoinRequestHistory,
 } = require("../controllers/team.controller.js");
 
 const protect = require("../middleware/auth.middleware.js");
@@ -52,6 +53,13 @@ router.delete("/:teamId/join-requests/me", protect, withdrawJoinRequest);
 
 // Get received join request statistics (creator only)
 router.get("/:teamId/join-requests/stats", protect, getTeamJoinRequestStats);
+
+// Get application's recorded status history
+router.get(
+  "/:teamId/join-requests/:requestId/history",
+  protect,
+  getJoinRequestHistory,
+);
 
 // Get join requests (Protected Route)
 router.get("/:teamId/join-requests", protect, getTeamJoinRequests);
