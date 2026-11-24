@@ -788,52 +788,97 @@ const updateTeam = async (req, res) => {
 };
 
 const deleteTeam = async (req, res) => {
+  const { teamId } = req.params;
+  const userId = req.user.userId.toString();
+
+  // Step 1: Validate Team ID
+  if (!mongoose.Types.ObjectId.isValid(teamId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid team ID",
+    });
+  }
+
+  // Helper for business errors
+  const fail = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
+  };
+
+  let session;
+
   try {
-    const { teamId } = req.params;
+    // Step 2: Start MongoDB session
+    session = await mongoose.startSession();
 
-    // Step 1: Validate Team ID
-    if (!mongoose.Types.ObjectId.isValid(teamId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid team ID",
-      });
-    }
+    let deletedRequestsCount = 0;
 
-    // Step 2: Find team
-    const team = await Team.findById(teamId);
+    // Step 3: Execute deletion in one transaction
+    await session.withTransaction(async () => {
+      // Step 4: Find team inside transaction
+      const team = await Team.findById(teamId).session(session);
 
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not fount",
-      });
-    }
+      if (!team) {
+        fail(404, "Team not found");
+      }
 
-    // step 3: Only creator can delete the team
-    if (team.createdBy.toString() !== req.user.userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Only the team creator can delete this team",
-      });
-    }
+      // Step 5: Verify team creator
+      if (team.createdBy.toString() !== userId) {
+        fail(403, "Only the team creator can delete this team");
+      }
 
-    // Step 4: Delete all related join requests
-    await JoinRequest.deleteMany({ team: teamId });
+      // Step 6: Delete related join requests
+      // deleteMany => One team can 
+      const deletedRequests = await JoinRequest.deleteMany(
+        { team: team._id },
+        { session },
+      );
 
-    // Step 5: Delete the team
-    await Team.findByIdAndDelete(teamId);
+      // Step 7: Delete the team
+      const deletedTeam = await Team.deleteOne(
+        {
+          _id: team._id,
+          createdBy: team.createdBy,
+        },
+        { session },
+      );
 
+      // Step 8: Verify team deletion
+      if (deletedTeam.deletedCount !== 1) {
+        fail(409, "Team deletion failed due to a concurrent change");
+      }
+
+      deletedRequestsCount = deletedRequests.deletedCount;
+    });
+
+    // Step 9: Respond only after commit
     return res.status(200).json({
       success: true,
-      message: "Team deleted Successfully",
+      message: "Team deleted successfully",
+      deletedTeamId: teamId,
+      deletedJoinRequests: deletedRequestsCount,
     });
   } catch (error) {
-    console.error("Delete Team Error:", error);
+    // Handle expected errors
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error("Delete Team Transaction Error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to delete team",
     });
+  } finally {
+    // Step 10: Always release session
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 
@@ -971,111 +1016,144 @@ const leaveTeam = async (req, res) => {
 };
 
 const removeTeamMember = async (req, res) => {
+  const { teamId, memberId } = req.params;
+  const userId = req.user.userId.toString();
+
+  // Step 1: Validate MongoDB IDs
+  if (
+    !mongoose.Types.ObjectId.isValid(teamId) ||
+    !mongoose.Types.ObjectId.isValid(memberId)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid team ID or member ID",
+    });
+  }
+
+  // Helper for business errors
+  const fail = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
+  };
+
+  let session;
+
   try {
-    const { teamId, memberId } = req.params;
-    const userId = req.user.userId;
+    // Step 2: Start MongoDB session
+    session = await mongoose.startSession();
 
-    // step 1: validate ID's
-    if (
-      !mongoose.Types.ObjectId.isValid(teamId) ||
-      !mongoose.Types.ObjectId.isValid(memberId)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid team ID or member ID",
-      });
-    }
+    let updatedTeamStatus;
 
-    // step 2: Find team
-    const team = await Team.findById(teamId);
+    // Step 3: Execute operations in one transaction
+    await session.withTransaction(async () => {
+      // Step 4: Fetch team inside transaction
+      const team = await Team.findById(teamId).session(session);
 
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not found",
-      });
-    }
+      if (!team) {
+        fail(404, "Team not found");
+      }
 
-    // step 3: Only creator can remove member
-    if (team.createdBy.toString() !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Only the team creator can remove members",
-      });
-    }
+      // Step 5: Only creator can remove members
+      if (team.createdBy.toString() !== userId) {
+        fail(403, "Only the team creator can remove members");
+      }
 
-    // step 4: prevent removing the creator
-    if (team.createdBy.toString() === memberId) {
-      return res.status(400).json({
-        success: false,
-        message: "Team creator cannot be removed",
-      });
-    }
+      // Step 6: Prevent creator self-removal
+      if (team.createdBy.toString() === memberId) {
+        fail(400, "Team creator cannot be removed");
+      }
 
-    // step 5: check membership
-    const isMember = team.members.some(
-      (member) => member.user.toString() === memberId,
-    );
+      // Step 7: Check if target is a member
+      const isMember = team.members.some(
+        (member) => member.user.toString() === memberId,
+      );
 
-    if (!isMember) {
-      return res.status(404).json({
-        success: false,
-        message: "User is not a member of this team",
-      });
-    }
+      if (!isMember) {
+        fail(404, "User is not a member of this team");
+      }
 
-    // step 6: remove member
-    team.members = team.members.filter(
-      (member) => member.user.toString() !== memberId,
-    );
+      // Step 8: Remove member from team
+      team.members = team.members.filter(
+        (member) => member.user.toString() !== memberId,
+      );
 
-    if (team.status === "full" && team.members.length < team.maxMembers) {
-      team.status = "recruiting";
-    }
+      // Step 9: Reopen team if it was full
+      if (team.status === "full" && team.members.length < team.maxMembers) {
+        team.status = "recruiting";
+      }
 
-    // step 7: save updated team
-    await team.save();
+      // Step 10: Save team within transaction
+      await team.save({ session });
 
-    const removalTime = new Date();
+      // Step 11: Update JoinRequest and history
+      const removalTime = new Date();
 
-    await JoinRequest.findOneAndUpdate(
-      {
-        team: teamId,
-        user: memberId,
-        status: "accepted", // only accepted req should modify
-      },
-      {
-        $set: {
-          status: "removed",
+      const updatedRequest = await JoinRequest.findOneAndUpdate(
+        {
+          team: teamId,
+          user: memberId,
+          status: "accepted",
         },
-
-        // Record removal in lifecycle history
-        $push: {
-          statusHistory: {
-            fromStatus: "accepted",
-            toStatus: "removed",
-            changedBy: req.user.userId,
-            changedAt: removalTime,
+        {
+          $set: {
+            status: "removed",
+          },
+          $push: {
+            statusHistory: {
+              fromStatus: "accepted",
+              toStatus: "removed",
+              changedBy: userId,
+              changedAt: removalTime,
+            },
           },
         },
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
-    );
+        {
+          session,
+          new: true,
+          runValidators: true,
+        },
+      );
 
+      // Step 12: Abort if accepted request is missing
+      if (!updatedRequest) {
+        fail(
+          409,
+          "Accepted join request not found. Membership state is inconsistent",
+        );
+      }
+
+      updatedTeamStatus = team.status;
+    });
+
+    // Step 13: Respond after transaction commits
     return res.status(200).json({
       success: true,
       message: "Team member removed successfully",
+      teamId,
+      removedMemberId: memberId,
+      teamStatus: updatedTeamStatus,
     });
   } catch (error) {
-    console.error("Remove Team Member Error:", error);
+    // Handle expected business errors
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    console.error("Remove Team Member Transaction Error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to remove team member",
     });
+  } finally {
+    // Step 14: Always release session
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 
