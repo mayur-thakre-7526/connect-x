@@ -141,180 +141,255 @@ const discoverTeams = async (req, res) => {
 };
 
 const sendJoinRequest = async (req, res) => {
+  const { teamId } = req.params;
+  const userId = req.user.userId.toString();
+
+  // Step 1: Validate request body
+  const result = createJoinRequestSchema.safeParse(req.body);
+
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      message: "Validation failed",
+      errors: result.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  // Step 2: Validate Team ID
+  if (!mongoose.Types.ObjectId.isValid(teamId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid team ID",
+    });
+  }
+
+  const fail = (statusCode, message) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    throw error;
+  };
+
+  let session;
+
   try {
-    // 1. Validate req body
-    const validationResult = createJoinRequestSchema.safeParse(req.body);
+    session = await mongoose.startSession();
 
-    if (!validationResult.success) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid request data",
-        errors: validationResult.error.issues,
-      });
-    }
+    let responseData;
 
-    const { message } = validationResult.data;
+    // Step 3: Start transaction
+    await session.withTransaction(async () => {
+      // Step 4: Find team inside transaction
+      const team = await Team.findById(teamId).session(session);
 
-    // validate team id
-    const { teamId } = req.params;
-
-    // Validate MongoDB ObjID
-    if (!mongoose.Types.ObjectId.isValid(teamId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid team ID",
-      });
-    }
-
-    // 2. Find the requested team
-    const team = await Team.findById(teamId);
-
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: "Team not found",
-      });
-    }
-
-    // 3. Check whether team is recruiting
-    if (team.status !== "recruiting") {
-      return res.status(400).json({
-        success: false,
-        message: "This team is not accepting new members",
-      });
-    }
-
-    // 4. Check whether user is already a member
-
-    const isMember = team.members.some(
-      (member) => member.user.toString() === req.user.userId,
-    );
-
-    if (isMember) {
-      return res.status(400).json({
-        success: false,
-        message: "You are already a member of this team",
-      });
-    }
-
-    // 5. Check whether team is full
-    if (team.members.length >= team.maxMembers) {
-      return res.status(400).json({
-        success: false,
-        message: "This team is already full",
-      });
-    }
-
-    // 6. Check existing join req
-    const existingRequest = await JoinRequest.findOne({
-      team: team._id,
-      user: req.user.userId,
-    });
-
-    if (existingRequest) {
-      // Case 1: Request already pending
-      if (existingRequest.status === "pending") {
-        return res.status(409).json({
-          success: false,
-          message: "You already have a pending request",
-        });
+      if (!team) {
+        fail(404, "Team not found");
       }
 
-      // Case 2: Request already accepted
-      if (existingRequest.status === "accepted") {
-        return res.status(400).json({
-          success: false,
-          message: "Join request is already accepted",
-        });
+      // Step 5: Prevent creator from applying
+      if (team.createdBy.toString() === userId) {
+        fail(400, "Team creator cannot send a join request");
       }
 
-      // Case 3: Student was removed by leader
-      if (existingRequest.status === "removed") {
-        return res.status(403).json({
-          success: false,
-          message:
-            "You were removed from this team and cannot reaaply at this time",
-        });
+      // Step 6: Check recruitment
+      if (team.status !== "recruiting") {
+        fail(400, "Team is not accepting join requests");
       }
 
-      // Case 4: Reapply after rejection or leaving
-      if (["rejected", "left", "withdrawn"].includes(existingRequest.status)) {
-        // step 1: Preserve previous status
-        const previousStatus = existingRequest.status;
-
-        // step 2: Update req
-        existingRequest.status = "pending";
-
-        // Use the validated request message
-        existingRequest.message = message;
-
-        // Clear the previous reivew timestamp
-        existingRequest.reviewedAt = null;
-
-        // step 3: Record reapplication transition
-        existingRequest.statusHistory.push({
-          fromStatus: previousStatus,
-          toStatus: "pending",
-          changedBy: userId,
-          changedAt: new Date(),
-        });
-
-        // step 4: Save status and history together
-        await existingRequest.save();
-
-        return res.stats(200).json({
-          success: true,
-          message: "Join request submitted again successfully",
-          request: existingRequest,
-        });
+      // Step 7: Check capacity
+      if (team.members.length >= team.maxMembers) {
+        fail(400, "Team is already full");
       }
 
-      // Reject any other unsupported lifecycle state
-      return res.status(409).json({
-        success: false,
-        message: "This join request cannot be resubmitted",
-      });
-    }
+      // Step 8: Check existing membership
+      const isMember = team.members.some(
+        (member) => member.user.toString() === userId,
+      );
 
-    // 7. Create a new join request
-    const joinRequest = await JoinRequest.create({
-      team: team._id,
-      user: req.user.userId,
-      message,
-      status: "pending",
+      if (isMember) {
+        fail(400, "You are already a member of this team");
+      }
 
-      // Record initial application event
-      statusHistory: [
+      // Step 9: Guard against concurrent Team changes
+      // This performs a real write to the Team document.
+      const gateResult = await Team.updateOne(
         {
-          fromStatus: null,
-          toStatus: "pending",
-          changedBy: userId,
-          changedAt: new Date(),
+          _id: team._id,
+          status: "recruiting",
+          "members.user": {
+            $ne: new mongoose.Types.ObjectId(userId),
+          },
+          $expr: {
+            $lt: [{ $size: "$members" }, "$maxMembers"],
+          },
         },
-      ],
+        {
+          $inc: {
+            joinRequestGateVersion: 1,
+          },
+        },
+        {
+          session,
+          timestamps: false,
+        },
+      );
+
+      if (gateResult.modifiedCount !== 1) {
+        fail(409, "Team availability changed. Please refresh and try again.");
+      }
+
+      // Step 10: Find existing request
+      const existingRequest = await JoinRequest.findOne({
+        team: teamId,
+        user: userId,
+      }).session(session);
+
+      if (existingRequest) {
+        // Already pending
+        if (existingRequest.status === "pending") {
+          fail(409, "Join request is already pending");
+        }
+
+        // Already accepted
+        if (existingRequest.status === "accepted") {
+          fail(400, "Join request is already accepted");
+        }
+
+        // Removed by team leader
+        if (existingRequest.status === "removed") {
+          fail(
+            403,
+            "You were removed from this team and cannot reapply at this time",
+          );
+        }
+
+        // Step 11: Reapplication
+        if (
+          ["rejected", "left", "withdrawn"].includes(existingRequest.status)
+        ) {
+          const previousStatus = existingRequest.status;
+          const reapplyTime = new Date();
+
+          const updatedRequest = await JoinRequest.findOneAndUpdate(
+            {
+              _id: existingRequest._id,
+              team: teamId,
+              user: userId,
+              status: previousStatus,
+            },
+            {
+              $set: {
+                status: "pending",
+                message: result.data.message,
+                reviewedAt: null,
+              },
+              $push: {
+                statusHistory: {
+                  fromStatus: previousStatus,
+                  toStatus: "pending",
+                  changedBy: userId,
+                  changedAt: reapplyTime,
+                },
+              },
+            },
+            {
+              session,
+              new: true,
+              runValidators: true,
+            },
+          );
+
+          if (!updatedRequest) {
+            fail(
+              409,
+              "Join request status changed. Please refresh and try again.",
+            );
+          }
+
+          responseData = {
+            statusCode: 200,
+            body: {
+              success: true,
+              message: "Join request submitted again successfully",
+              request: updatedRequest,
+            },
+          };
+
+          return;
+        }
+
+        fail(409, "This join request cannot be resubmitted");
+      }
+
+      // Step 12: Create first-time request
+      const createdRequests = await JoinRequest.create(
+        [
+          {
+            team: teamId,
+            user: userId,
+            message: result.data.message,
+            status: "pending",
+            statusHistory: [
+              {
+                fromStatus: null,
+                toStatus: "pending",
+                changedBy: userId,
+                changedAt: new Date(),
+              },
+            ],
+          },
+        ],
+        { session },
+      );
+
+      responseData = {
+        statusCode: 201,
+        body: {
+          success: true,
+          message: "Join request sent successfully",
+          request: createdRequests[0],
+        },
+      };
     });
 
-    // 8. Return response
-    return res.status(201).json({
-      success: true,
-      message: "Join request sent successfully",
-      joinRequest,
-    });
+    // Step 13: Respond after transaction commits
+    return res.status(responseData.statusCode).json(responseData.body);
   } catch (error) {
-    // Handle MongoDB duplicate key error
-
+    // Existing unique index protection
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "You have already send a join request to this team",
+        message: "A join request already exists for this team",
       });
     }
-    console.error("Send join request error:", error);
+
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    // Handle unresolved transaction write conflicts
+    if (
+      error.code === 112 ||
+      error.hasErrorLabel?.("TransientTransactionError")
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Concurrent team update detected. Please retry.",
+      });
+    }
+
+    console.error("Send Join Request Error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Internal server error",
+      message: "Failed to send join request",
     });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 
@@ -829,7 +904,7 @@ const deleteTeam = async (req, res) => {
       }
 
       // Step 6: Delete related join requests
-      // deleteMany => One team can 
+      // deleteMany => One team can
       const deletedRequests = await JoinRequest.deleteMany(
         { team: team._id },
         { session },

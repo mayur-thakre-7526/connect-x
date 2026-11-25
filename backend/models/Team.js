@@ -76,6 +76,11 @@ const teamSchema = new mongoose.Schema(
       enum: ["recruiting", "full", "closed"],
       default: "recruiting",
     },
+    joinRequestGateVersion: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
   },
   { timestamps: true },
 );
